@@ -1,17 +1,54 @@
+import logging
 import os
+from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
-# Assuming you are running from the root folder
-from src.routers import ping 
+from src.config import get_settings
+from src.db.factory import make_database
+from src.routers import ping
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan for the API.
+    """
+    logger.info("Starting RAG API...")
+
+    settings = get_settings()
+    app.state.settings = settings
+
+    database = make_database()
+    app.state.database = database
+    logger.info("Database connected")
+
+    logger.info("API ready")
+    yield
+
+    # Cleanup
+    database.teardown()
+    logger.info("API shutdown complete")
+
 
 app = FastAPI(
     title="arXiv Paper Curator API",
-    version="0.1.0",
+    description="Personal arXiv CS.AI paper curator with RAG capabilities",
+    version=os.getenv("APP_VERSION", "0.1.0"),
+    lifespan=lifespan,
 )
 
-# This matches the code in your ping.py
-
+# Include routers
 app.include_router(ping.router, prefix="/api/v1")
+#app.include_router(papers.router, prefix="/api/v1")
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, port=8000, host="0.0.0.0")
