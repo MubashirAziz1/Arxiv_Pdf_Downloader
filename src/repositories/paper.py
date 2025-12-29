@@ -42,3 +42,15 @@ class PaperRepository:
         self.session.refresh(paper)
         return paper
 
+    def upsert(self, paper_create: PaperBase) -> Paper:
+        # Check if paper already exists
+        existing_paper = self.get_by_arxiv_id(paper_create.arxiv_id)
+        if existing_paper:
+            # Update existing paper with new content
+            for key, value in paper_create.model_dump(exclude_unset=True).items():
+                setattr(existing_paper, key, value)
+            return self.update(existing_paper)
+        else:
+            # Create new paper
+            return self.create(paper_create)
+
