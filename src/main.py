@@ -47,7 +47,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(ping.router, prefix="/api/v1")
-#app.include_router(papers.router, prefix="/api/v1")
+app.include_router(papers.router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
