@@ -61,7 +61,7 @@ class MetadataFetcher:
             max_results: Maximum papers to fetch
             from_date: Filter papers from this date (YYYYMMDD)
             to_date: Filter papers to this date (YYYYMMDD)
-            process_pdfs: Whether to download and parse PDFs
+            process_pdfs: Whether to download  PDFs
             store_to_db: Whether to store results in database
             db_session: Database session (required if store_to_db=True)
 
