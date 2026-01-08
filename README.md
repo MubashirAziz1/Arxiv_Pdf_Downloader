@@ -1,42 +1,42 @@
 # ArXiv PDF Downloader
 
-A comprehensive system for automatically downloading and managing scientific papers from arXiv using Apache Airflow DAGs and a FastAPI-based REST API. This project enables automated daily paper ingestion, PDF downloading, metadata extraction, and database storage to help researchers stay updated with the latest publications.
+A simple command-line tool for automatically downloading scientific papers from arXiv with metadata storage. Designed for materials science research but easily configurable for any arXiv category.
 
 ## 🎯 Features
 
-- **Automated Daily Paper Ingestion**: Airflow DAGs automatically fetch new papers from arXiv on a scheduled basis (Monday-Friday at 6 AM UTC)
-- **PDF Download & Caching**: Downloads PDFs with intelligent caching to avoid redundant downloads
-- **Metadata Extraction**: Extracts and stores paper metadata (title, authors, abstract, categories, publication date)
-- **REST API**: FastAPI-based API for programmatic access to paper data
-- **Database Integration**: PostgreSQL database for persistent storage of paper metadata
+- **Single Command Execution**: Download papers with one terminal command
+- **PDF Download & Caching**: Downloads PDFs locally with intelligent caching to avoid redundant downloads
+- **Metadata Storage**: PostgreSQL database for persistent storage of paper metadata (title, authors, abstract, categories, publication dates)
+- **Flexible Database Setup**: Uses PostgreSQL Docker container (recommended) or local installation - easily switchable
 - **Rate Limiting**: Respects arXiv API rate limits (3-second delay between requests)
-- **Error Handling**: Robust error handling with retry logic for failed downloads
-- **Daily Reports**: Automated daily processing reports with statistics
-- **Customizable Search**: Support for custom arXiv search queries and date filtering
+- **Retry Logic**: Robust error handling with automatic retry for failed downloads
+- **Easy Configuration**: Change research category by simply editing `config.py`
+- **Customizable Search**: Support for custom date ranges and search queries
+- **Portable & Maintainable**: Docker-based setup for easy deployment and maintenance
 
 ## 🏗️ Architecture
 
-The project consists of two main components:
+**Simple CLI Tool + Database Storage**
 
-1. **FastAPI Application**: REST API for querying and managing papers
-2. **Apache Airflow DAGs**: Automated workflows for daily paper ingestion
+- Fetches papers from arXiv API
+- Stores metadata in PostgreSQL database
+- Saves PDFs to local folder (`pdf_cache/`)
+- Runs via single command in terminal
 
 ### Technology Stack
 
-- **Backend**: FastAPI, Python 3.12
+- **Language**: Python 3.12
 - **Database**: PostgreSQL with SQLAlchemy ORM
-- **Workflow Orchestration**: Apache Airflow
 - **HTTP Client**: httpx (async)
-- **PDF Processing**: Docling
 - **Configuration**: Pydantic Settings
-- **Package Management**: uv (via pyproject.toml)
+- **Package Management**: uv
 
 ## 📋 Prerequisites
 
-- Python 3.12
-- PostgreSQL database
-- Apache Airflow (for automated ingestion)
-- Docker (optional, for containerized Airflow deployment)
+- Python 3.12+
+- PostgreSQL database (Docker image recommended, or local installation)
+- Docker (optional, for PostgreSQL container)
+- uv package manager
 
 ## 🚀 Installation
 
@@ -47,50 +47,89 @@ git clone <repository-url>
 cd Arxiv_PDF_Downloader
 ```
 
-### 2. Install Dependencies
-
-The project uses `uv` for package management. Install dependencies:
+### 2. Install uv Package Manager
 
 ```bash
 # Install uv if not already installed
 pip install uv
-
-# Install project dependencies
-uv sync
-
-# Install development dependencies (optional)
-uv sync --group dev
 ```
 
-### 3. Environment Configuration
+### 3. Create Virtual Environment & Install Dependencies
 
-Create a `.env` file in the project root with the following variables:
+```bash
+# Create and activate virtual environment with uv
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install all dependencies
+uv sync
+```
+
+### 4. Environment Configuration
+
+Create a `.env` file in the project root:
 
 ```env
-# Application Settings
-APP_VERSION=0.1.0
-DEBUG=true
-ENVIRONMENT=development
-SERVICE_NAME=arxiv-pdf-downloader
-
 # PostgreSQL Configuration
 POSTGRES_DATABASE_URL=postgresql://rag_user:rag_password@localhost:5432/rag_db
 POSTGRES_ECHO_SQL=false
 POSTGRES_POOL_SIZE=20
 POSTGRES_MAX_OVERFLOW=0
 
-# ArXiv API Settings (optional, defaults provided)
+# ArXiv API Settings
 ARXIV__BASE_URL=https://export.arxiv.org/api/query
-ARXIV__SEARCH_CATEGORY=cs.AI
-ARXIV__MAX_RESULTS=10
+ARXIV__SEARCH_CATEGORY=cond-mat.mtrl-sci  # Materials Science
+ARXIV__MAX_RESULTS=50
 ARXIV__RATE_LIMIT_DELAY=3.0
 ARXIV__TIMEOUT_SECONDS=30
 ARXIV__PDF_CACHE_DIR=./pdf_cache
 ```
 
-### 4. Database Setup
+### 5. Database Setup
 
-Ensure PostgreSQL is running and create the database:
+**Option A: PostgreSQL with Docker (Recommended)**
+
+Run PostgreSQL in a Docker container:
+
+```bash
+# Pull and run PostgreSQL Docker image
+docker run -d \
+  --name arxiv-postgres \
+  -e POSTGRES_DB=rag_db \
+  -e POSTGRES_USER=rag_user \
+  -e POSTGRES_PASSWORD=rag_password \
+  -p 5432:5432 \
+  -v pgdata:/var/lib/postgresql/data \
+  postgres:16
+
+# Verify it's running
+docker ps | grep arxiv-postgres
+
+# View logs (optional)
+docker logs arxiv-postgres
+```
+
+
+
+**Managing Docker PostgreSQL:**
+```bash
+# Stop container
+docker stop arxiv-postgres
+
+# Start container
+docker start arxiv-postgres
+
+# Remove container (data persists in volume)
+docker rm arxiv-postgres
+
+# Remove container AND data
+docker rm arxiv-postgres
+docker volume rm pgdata
+```
+
+**Option B: Local PostgreSQL Installation**
+
+If you prefer a local installation:
 
 ```bash
 # Connect to PostgreSQL
@@ -99,239 +138,130 @@ psql -U postgres
 # Create database
 CREATE DATABASE rag_db;
 
-# Create user (if needed)
+# Create user
 CREATE USER rag_user WITH PASSWORD 'rag_password';
 GRANT ALL PRIVILEGES ON DATABASE rag_db TO rag_user;
 ```
 
-Run database migrations (if using Alembic):
-
-```bash
-alembic upgrade head
-```
+**Note**: The database tables will be created automatically on first run. You can use either Docker or local PostgreSQL - the connection string in `.env` works for both!
 
 ## 🎮 Usage
 
-### Running the FastAPI Application
+### Running the Downloader
 
-Start the API server:
+Download papers with a single command:
 
 ```bash
-# From project root
+# Activate virtual environment (if not already active)
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Run the paper ingestion
 python -m src.main
-
-# Or using uvicorn directly
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API will be available at `http://localhost:8000`
+This will:
+1. Fetch papers from arXiv based on your configured category
+2. Download PDFs to `pdf_cache/` folder
+3. Store metadata in PostgreSQL database
+4. Skip already downloaded papers (intelligent caching)
 
-API Documentation (Swagger UI): `http://localhost:8000/docs`
+### Customizing Paper Download
 
-### Using the Airflow DAGs
+#### Change Research Category
 
-#### Setup Airflow
+Edit `src/config.py` and modify the `search_category`:
 
-1. **Using Docker** (Recommended):
-
-   The project includes a Dockerfile for Airflow. Build and run:
-
-   ```bash
-   cd airflow
-   docker build -t arxiv-airflow .
-   docker run -d -p 8080:8080 arxiv-airflow
-   ```
-
-2. **Local Installation**:
-
-   Install Airflow and dependencies:
-
-   ```bash
-   pip install -r airflow/requirements-airflow.txt
-   ```
-
-   Set up Airflow:
-
-   ```bash
-   export AIRFLOW_HOME=/path/to/airflow
-   airflow db init
-   airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com
-   ```
-
-#### Running the DAG
-
-1. Access Airflow UI at `http://localhost:8080`
-2. Login with your credentials
-3. Enable the `arxiv_paper_ingestion` DAG
-4. The DAG will automatically run on schedule (Monday-Friday at 6 AM UTC)
-
-#### Manual DAG Trigger
-
-You can also trigger the DAG manually:
-
-```bash
-airflow dags trigger arxiv_paper_ingestion
+```python
+class ArxivSettings(BaseSettings):
+    search_category: str = "cond-mat.mtrl-sci"  # Change this!
 ```
 
-### DAG Workflow
+**Common arXiv Categories:**
+- `cond-mat.mtrl-sci` - Materials Science (default)
+- `cs.AI` - Artificial Intelligence
+- `cs.LG` - Machine Learning
+- `cs.CV` - Computer Vision and Pattern Recognition
+- `physics.app-ph` - Applied Physics
+- `cond-mat.mes-hall` - Mesoscale and Nanoscale Physics
+- `cond-mat.stat-mech` - Statistical Mechanics
 
-The `arxiv_paper_ingestion` DAG consists of the following tasks:
+See [arXiv category taxonomy](https://arxiv.org/category_taxonomy) for complete list.
 
-1. **setup_environment**: Verifies database connection and initializes services
-2. **fetch_daily_papers**: Fetches papers from arXiv for the previous day
-3. **process_failed_pdfs**: Retries processing of any failed PDF downloads
-4. **create_opensearch_placeholders**: Creates placeholders for OpenSearch integration (if configured)
-5. **generate_daily_report**: Generates a summary report of the day's processing
-6. **cleanup_temp_files**: Cleans up temporary files older than 30 days
+
 
 ## 📁 Project Structure
 
 ```
 Arxiv_PDF_Downloader/
-├── airflow/                    # Airflow DAGs and configuration
-│   ├── dags/
-│   │   ├── arxiv_ingestion/    # DAG task modules
-│   │   │   ├── __init__.py
-│   │   │   └── tasks.py        # Task implementations
-│   │   ├── arxiv_paper_ingestion.py  # Main DAG definition
-│   │   └── hello_world_dag.py
-│   ├── Dockerfile              # Airflow container definition
-│   ├── entrypoint.sh           # Airflow entrypoint script
-│   └── requirements-airflow.txt # Airflow dependencies
 ├── src/                        # Main application source code
-│   ├── config.py              # Configuration management
+│   ├── config.py              # Configuration (EDIT THIS for category change)
 │   ├── database.py            # Database setup
 │   ├── dependencies.py        # Dependency injection
 │   ├── exceptions.py          # Custom exceptions
-│   ├── main.py                # FastAPI application entry point
-│   ├── db/                    # Database abstractions
-│   │   ├── factory.py
-│   │   └── interfaces/        # Database interface implementations
 │   ├── models/                # SQLAlchemy models
-│   │   └── paper.py
+│   │   └── paper.py           # Paper database model
 │   ├── repositories/          # Data access layer
-│   │   └── paper.py
-│   ├── routers/               # API route handlers
-│   │   └── ping.py            # Health check endpoint
+│   │   └── paper.py           # Paper repository
 │   ├── schemas/               # Pydantic schemas
-│   │   ├── api/               # API request/response schemas
 │   │   └── arxiv/             # ArXiv data schemas
+│   │       └── paper.py       # Paper data structure
 │   └── services/              # Business logic
 │       ├── arxiv/             # ArXiv API client
 │       │   ├── client.py      # Main ArXiv client
-│       │   └── factory.py
+│       │   └── factory.py     # Client factory
 │       └── metadata_fetcher.py # Paper metadata processing
+├── pdf_cache/                 # Downloaded PDFs stored here
 ├── pyproject.toml             # Project configuration and dependencies
 ├── uv.lock                    # Dependency lock file
+├── .env                       # Environment variables (create this)
 └── README.md                  # This file
 ```
 
 ## 🔧 Configuration
 
-### ArXiv API Settings
+### Quick Start Configuration
 
-The ArXiv client can be configured via environment variables:
+1. **Change Research Category**: Edit `ARXIV__SEARCH_CATEGORY` in `.env` or modify `src/config.py`
+2. **Adjust Rate Limiting**: Modify `ARXIV__RATE_LIMIT_DELAY` (minimum 3.0 seconds recommended)
+3. **Change PDF Storage**: Update `ARXIV__PDF_CACHE_DIR` path
+4. **Control Download Volume**: Set `ARXIV__MAX_RESULTS` (max 2000 per request)
+5. **Switch Database**: Change `POSTGRES_DATABASE_URL` in `.env` (works with Docker or local PostgreSQL)
 
-- `ARXIV__BASE_URL`: ArXiv API base URL (default: `https://export.arxiv.org/api/query`)
-- `ARXIV__SEARCH_CATEGORY`: Default category to search (e.g., `cs.AI`, `cond-mat.mtrl-sci`)
-- `ARXIV__MAX_RESULTS`: Maximum number of results per query (default: 10)
-- `ARXIV__RATE_LIMIT_DELAY`: Delay between API requests in seconds (default: 3.0)
-- `ARXIV__TIMEOUT_SECONDS`: Request timeout in seconds (default: 30)
-- `ARXIV__PDF_CACHE_DIR`: Directory for caching downloaded PDFs
+**Example - Switching to Different Database:**
+```env
+# Use different Docker container
+POSTGRES_DATABASE_URL=postgresql://user:pass@localhost:5433/different_db
 
-### Search Categories
+# Use remote PostgreSQL server
+POSTGRES_DATABASE_URL=postgresql://user:pass@192.168.1.100:5432/arxiv_db
+```
 
-Common arXiv categories:
-- `cs.AI`: Artificial Intelligence
-- `cs.LG`: Machine Learning
-- `cs.CV`: Computer Vision
-- `cond-mat.mtrl-sci`: Materials Science
-- `physics`: Physics (general)
+### Database Configuration
 
-See [arXiv category taxonomy](https://arxiv.org/category_taxonomy) for a complete list.
+The tool stores paper metadata including:
+- arXiv ID
+- Title
+- Authors
+- Abstract
+- Publication date
+- Categories
+- PDF URL and local path
 
-## 🧪 Development
+All data persists in PostgreSQL for easy querying and analysis.
 
-### Running Tests
+**PostgreSQL Flexibility:**
+- **Easy to maintain**: Docker container can be stopped/started without data loss
+- **Easy to modify**: Change credentials or database name by updating `.env` and recreating container
+- **Easy to backup**: Use `docker exec` for database dumps or volume backups
+- **Portable**: Switch between Docker and local PostgreSQL by changing connection string only
 
+**Database Backup (Docker):**
 ```bash
-# Run all tests
-pytest
+# Backup database
+docker exec arxiv-postgres pg_dump -U rag_user rag_db > backup.sql
 
-# Run with coverage
-pytest --cov=src --cov-report=html
-
-# Run specific test file
-pytest tests/test_arxiv_client.py
-```
-
-### Code Quality
-
-The project uses `ruff` for linting and `mypy` for type checking:
-
-```bash
-# Lint code
-ruff check src/
-
-# Format code
-ruff format src/
-
-# Type checking
-mypy src/
-```
-
-### Pre-commit Hooks
-
-Install pre-commit hooks:
-
-```bash
-pre-commit install
-```
-
-## 📝 API Endpoints
-
-### Health Check
-
-- **GET** `/api/v1/ping`: Health check endpoint
-
-More endpoints can be added by implementing routers in `src/routers/`.
-
-## 🔍 ArXiv Client Usage
-
-The ArXiv client provides several methods for fetching papers:
-
-### Fetch Papers by Category
-
-```python
-from src.services.arxiv.factory import make_arxiv_client
-
-client = make_arxiv_client()
-papers = await client.fetch_papers(
-    max_results=10,
-    from_date="20240101",
-    to_date="20240131"
-)
-```
-
-### Fetch Papers with Custom Query
-
-```python
-papers = await client.fetch_papers_with_query(
-    search_query="cat:cs.AI AND ti:transformer",
-    max_results=20
-)
-```
-
-### Fetch Specific Paper by ID
-
-```python
-paper = await client.fetch_paper_by_id("2507.17748")
-```
-
-### Download PDF
-
-```python
-pdf_path = await client.download_pdf(paper, force_download=False)
+# Restore database
+docker exec -i arxiv-postgres psql -U rag_user rag_db < backup.sql
 ```
 
 ## 🐛 Troubleshooting
@@ -339,25 +269,83 @@ pdf_path = await client.download_pdf(paper, force_download=False)
 ### Common Issues
 
 1. **Database Connection Errors**:
-   - Verify PostgreSQL is running
-   - Check database credentials in `.env`
-   - Ensure database exists and user has proper permissions
+   
+   **For Docker PostgreSQL:**
+   ```bash
+   # Check if container is running
+   docker ps | grep arxiv-postgres
+   
+   # Start if stopped
+   docker start arxiv-postgres
+   
+   # Check logs for errors
+   docker logs arxiv-postgres
+   
+   # Test connection
+   docker exec -it arxiv-postgres psql -U rag_user -d rag_db
+   ```
+   
+   **For Local PostgreSQL:**
+   ```bash
+   # Verify PostgreSQL is running
+   sudo systemctl status postgresql  # Linux
+   brew services list                # macOS
+   
+   # Test connection
+   psql -U rag_user -d rag_db -h localhost
+   ```
+   
+   **Common fixes:**
+   - Verify credentials in `.env` match your setup
+   - Ensure port 5432 is not blocked by firewall
+   - Check `POSTGRES_DATABASE_URL` format is correct
 
-2. **ArXiv API Rate Limiting**:
-   - The client automatically handles rate limiting with 3-second delays
-   - If you encounter 429 errors, increase `ARXIV__RATE_LIMIT_DELAY`
+2. **ArXiv API Rate Limiting (429 Error)**:
+   - **Wait 30-60 minutes** if you hit rate limit
+   - Increase `ARXIV__RATE_LIMIT_DELAY` to 5.0 or higher
+   - Avoid running the script multiple times in quick succession
+   - arXiv recommends maximum 1 request per 3 seconds
 
-3. **PDF Download Failures**:
-   - Check network connectivity
-   - Verify PDF URLs are accessible
-   - Review logs for specific error messages
-   - Failed downloads are automatically retried
 
-4. **Airflow DAG Not Running**:
-   - Verify DAG is enabled in Airflow UI
-   - Check Airflow scheduler is running
-   - Review DAG logs for errors
-   - Ensure all dependencies are installed in Airflow environment
+
+3. **uv Environment Issues**:
+   ```bash
+   # Recreate virtual environment
+   rm -rf .venv
+   uv venv
+   source .venv/bin/activate
+   uv sync
+   ```
+
+4. **Import Errors**:
+   ```bash
+   # Ensure you're in the project root directory
+   # Activate virtual environment first
+   source .venv/bin/activate
+   python -m src.main  # Use -m flag
+   ```
+
+## 🧪 Development
+
+### Adding New Features
+
+The codebase is modular and easy to extend:
+
+- **Add new data sources**: Implement new clients in `src/services/`
+- **Change data models**: Modify `src/models/paper.py`
+- **Add processing logic**: Extend `src/services/metadata_fetcher.py`
+
+
+
+## 🔮 Future Enhancements
+
+Planned features:
+- [ ] Airflow DAG for scheduled automation
+- [ ] FastAPI endpoints for programmatic access
+- [ ] Using Docling to Parse PDF Data
+- [ ] Multiple category support
+- [ ] Citation analysis
+- [ ] Full-text search
 
 ## 📄 License
 
@@ -367,10 +355,5 @@ pdf_path = await client.download_pdf(paper, force_download=False)
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📧 Contact
 
-[Add your contact information here]
-
----
-
-**Note**: This project is designed for personal use to stay updated with arXiv papers. Please respect arXiv's [terms of use](https://arxiv.org/help/api/user-manual) and rate limits when using this tool.
+**Note**: This tool is designed for personal research use. Please respect arXiv's [terms of use](https://arxiv.org/help/api/user-manual) and rate limits when using this tool.
