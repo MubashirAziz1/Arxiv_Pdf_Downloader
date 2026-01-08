@@ -1,12 +1,3 @@
-# 
-
-
-#!/usr/bin/env python3
-"""
-Standalone runner for arXiv paper ingestion pipeline.
-Run with: python main.py [--date YYYYMMDD] [--max-results N]
-"""
-
 import asyncio
 import argparse
 import logging

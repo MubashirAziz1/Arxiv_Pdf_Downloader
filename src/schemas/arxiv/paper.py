@@ -35,10 +35,10 @@ class PaperResponse(PaperBase):
         from_attributes = True
 
 
-class PaperSearchResponse(BaseModel):
-    """Response schema for paper search results."""
+# class PaperSearchResponse(BaseModel):
+#     """Response schema for paper search results."""
 
-    papers: List[PaperResponse] = Field(..., description="List of papers")
-    total: int = Field(..., description="Total number of papers")
+#     papers: List[PaperResponse] = Field(..., description="List of papers")
+#     total: int = Field(..., description="Total number of papers")
 
 
