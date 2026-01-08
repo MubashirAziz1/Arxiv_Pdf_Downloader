@@ -15,5 +15,4 @@ def make_arxiv_client() -> ArxivClient:
 
     # Create arXiv client with explicit settings
     client = ArxivClient(settings=settings.arxiv)
-
     return client

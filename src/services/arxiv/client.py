@@ -87,7 +87,6 @@ class ArxivClient:
             # Convert dates to arXiv format (YYYYMMDDHHMM) - use 0000 for start of day, 2359 for end
             date_from = f"{from_date}0000" if from_date else "*"
             date_to = f"{to_date}2359" if to_date else "*"
-            # Use correct arXiv API syntax with + symbols
             search_query += f" AND submittedDate:[{date_from}+TO+{date_to}]"
 
         params = {
@@ -157,12 +156,6 @@ class ArxivClient:
         Examples:
             # Papers from last 30 days
             "cat:cs.AI AND submittedDate:[20240101 TO *]"
-
-            # Papers by specific author
-            "au:LeCun AND cat:cs.AI"
-
-            # Papers with specific keywords in title
-            "ti:transformer AND cat:cs.AI"
         """
         if max_results is None:
             max_results = self.max_results

@@ -7,8 +7,6 @@ def make_database() -> BaseDatabase:
     """
     Factory function to create a database instance.
 
-    Returns:
-        BaseDatabase: An instance of the database.
     """
     # Get settings from centralized config
     settings = get_settings()

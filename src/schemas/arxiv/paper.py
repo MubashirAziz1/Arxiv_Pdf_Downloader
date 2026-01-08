@@ -27,3 +27,18 @@ class PaperBase(BaseModel):
     published_date: datetime = Field(..., description="Date published on arXiv")
     pdf_url: str = Field(..., description="URL to PDF")
 
+
+class PaperResponse(PaperBase):
+    """Response schema for paper data."""
+
+    class Config:
+        from_attributes = True
+
+
+class PaperSearchResponse(BaseModel):
+    """Response schema for paper search results."""
+
+    papers: List[PaperResponse] = Field(..., description="List of papers")
+    total: int = Field(..., description="Total number of papers")
+
+

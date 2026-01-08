@@ -34,8 +34,7 @@ class PaperRepository:
     def get_count(self) -> int:
         stmt = select(func.count(Paper.id))
         return self.session.scalar(stmt) or 0
-
-
+        
     def update(self, paper: Paper) -> Paper:
         self.session.add(paper)
         self.session.commit()
@@ -53,4 +52,3 @@ class PaperRepository:
         else:
             # Create new paper
             return self.create(paper_create)
-

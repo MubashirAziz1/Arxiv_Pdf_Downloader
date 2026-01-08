@@ -9,9 +9,7 @@ from sqlalchemy.orm import Session
 from src.exceptions import MetadataFetchingException, PipelineException
 from src.repositories.paper import PaperRepository
 from src.schemas.arxiv.paper import ArxivPaper, PaperBase
-#from src.schemas.pdf_parser.models import ArxivMetadata, ParsedPaper, PdfContent
 from src.services.arxiv.client import ArxivClient
-#from src.services.pdf_parser.parser import PDFParserService
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,6 @@ class MetadataFetcher:
     This service orchestrates the complete pipeline:
     1. Fetch paper metadata from arXiv API
     2. Download PDFs with caching
-    3. Parse PDFs with Docling
     4. Store complete paper data in PostgreSQL
     """
 
@@ -40,6 +37,7 @@ class MetadataFetcher:
             arxiv_client: ArxivClient instance for API calls
             pdf_cache_dir: Directory for PDF caching (uses client default if None)
             max_concurrent_downloads: Maximum concurrent PDF downloads
+
         """
         self.arxiv_client = arxiv_client
         self.pdf_cache_dir = pdf_cache_dir or self.arxiv_client.pdf_cache_dir
@@ -61,7 +59,7 @@ class MetadataFetcher:
             max_results: Maximum papers to fetch
             from_date: Filter papers from this date (YYYYMMDD)
             to_date: Filter papers to this date (YYYYMMDD)
-            process_pdfs: Whether to download  PDFs
+            process_pdfs: Whether to download and parse PDFs
             store_to_db: Whether to store results in database
             db_session: Database session (required if store_to_db=True)
 
@@ -72,6 +70,7 @@ class MetadataFetcher:
         results = {
             "papers_fetched": 0,
             "pdfs_downloaded": 0,
+            "papers_stored": 0,
             "errors": [],
             "processing_time": 0,
         }
@@ -100,7 +99,7 @@ class MetadataFetcher:
             # Step 3: Store to database if requested
             if store_to_db and db_session:
                 logger.info("Step 3: Storing papers to database...")
-                stored_count = self._store_papers_to_db(papers, pdf_results.get("parsed_papers", {}), db_session)
+                stored_count = self._store_papers_to_db(papers, db_session)
                 results["papers_stored"] = stored_count
             elif store_to_db:
                 logger.warning("Database storage requested but no session provided")
@@ -135,6 +134,8 @@ class MetadataFetcher:
 
         Uses overlapping download+parse pipeline:
         - Downloads happen concurrently (up to max_concurrent_downloads)
+        - As each download completes, parsing starts immediately
+        - Multiple PDFs can be parsing while others are still downloading
 
         This is optimal for production workloads like 100 papers/day.
 
@@ -155,9 +156,8 @@ class MetadataFetcher:
 
         # Create semaphores for controlled concurrency
         download_semaphore = asyncio.Semaphore(self.max_concurrent_downloads)
-
         # Start all download+parse pipelines concurrently
-        pipeline_tasks = [self._download_and_pipeline(paper, download_semaphore) for paper in papers]
+        pipeline_tasks = [self._download_pipeline(paper, download_semaphore) for paper in papers]
 
         # Wait for all pipelines to complete
         pipeline_results = await asyncio.gather(*pipeline_tasks, return_exceptions=True)
@@ -169,7 +169,7 @@ class MetadataFetcher:
                 logger.error(error_msg)
                 results["errors"].append(error_msg)
             elif result:
-                # Result is bool: True or False
+                # Result is tuple: (download_success, parsed_paper)
                 download_success = result
 
                 if download_success:
@@ -183,7 +183,7 @@ class MetadataFetcher:
                 results["download_failures"].append(paper.arxiv_id)
 
         # Simple processing summary
-        logger.info(f"PDF processing: {results['downloaded']}/{len(papers)} downloaded.")
+        logger.info(f"PDF processing: {results['downloaded']}/{len(papers)} downloaded. ")
 
         if results["download_failures"]:
             logger.warning(f"Download failures: {len(results['download_failures'])}")
@@ -191,16 +191,17 @@ class MetadataFetcher:
         # Add specific failure info to general errors list for backward compatibility
         if results["download_failures"]:
             results["errors"].extend([f"Download failed: {arxiv_id}" for arxiv_id in results["download_failures"]])
-       
+
         return results
 
-    async def _download_and_pipeline(
-        self, paper: ArxivPaper, download_semaphore: asyncio.Semaphore) -> bool:
+    async def _download_pipeline(
+        self, paper: ArxivPaper, download_semaphore: asyncio.Semaphore) -> tuple:
         """
         Complete download pipeline for a single paper with true parallelism.
+        Downloads PDF, then immediately starts parsing while other downloads continue.
 
         Returns:
-            download_success: bool
+            bool of download_success: bool
         """
         download_success = False
 
@@ -223,15 +224,13 @@ class MetadataFetcher:
 
         return download_success
 
-   
-
     def _store_papers_to_db(
         self,
         papers: List[ArxivPaper],
         db_session: Session,
     ) -> int:
         """
-        Store papers to database with comprehensive metadata storage.
+        Store papers  to database with comprehensive content storage.
 
         Args:
             papers: List of ArxivPaper metadata
@@ -245,8 +244,7 @@ class MetadataFetcher:
 
         for paper in papers:
             try:
-
-
+            
                 # Base paper data
                 published_date = (
                     date_parser.parse(paper.published_date) if isinstance(paper.published_date, str) else paper.published_date
@@ -260,13 +258,6 @@ class MetadataFetcher:
                     "published_date": published_date,
                     "pdf_url": paper.pdf_url,
                 }
-
-
-                # No parsed content - just store metadata
-                paper_data.update(
-                    {"pdf_processed": False, "parser_metadata": {"note": "PDF processing not available or failed"}}
-                )
-                logger.debug(f"Storing paper {paper.arxiv_id} with metadata only")
 
                 paper_create = PaperBase(**paper_data)
                 stored_paper = paper_repo.upsert(paper_create)
@@ -313,5 +304,4 @@ def make_metadata_fetcher(
         arxiv_client=arxiv_client,
         pdf_cache_dir=pdf_cache_dir,
         max_concurrent_downloads=5,
-        max_concurrent_parsing=1,
     )
