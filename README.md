@@ -1,32 +1,34 @@
-# ArXiv PDF Downloader
+# ArXiv PDF Downloader & Parser
 
-A simple command-line tool for automatically downloading scientific papers from arXiv with metadata storage. Designed for materials science research but easily configurable for any arXiv category.
+A comprehensive command-line tool for automatically downloading and parsing scientific papers from arXiv with metadata storage and full PDF text extraction. Designed for materials science research but easily configurable for any arXiv category.
 
 ## 🎯 Features
 
-- **Single Command Execution**: Download papers with one terminal command
+- **Single Command Execution**: Download and parse papers with one terminal command
 - **PDF Download & Caching**: Downloads PDFs locally with intelligent caching to avoid redundant downloads
-- **Metadata Storage**: PostgreSQL database for persistent storage of paper metadata (title, authors, abstract, categories, publication dates)
+- **Advanced PDF Parsing**: Extracts full text, tables, and figures from PDFs using Docling
 - **Flexible Database Setup**: Uses PostgreSQL Docker container (recommended) or local installation - easily switchable
 - **Rate Limiting**: Respects arXiv API rate limits (3-second delay between requests)
 - **Retry Logic**: Robust error handling with automatic retry for failed downloads
-- **Easy Configuration**: Change research category by simply editing `config.py`
+- **Easy Configuration**: Change research category by simply editing command-line arguments
 - **Customizable Search**: Support for custom date ranges and search queries
 - **Portable & Maintainable**: Docker-based setup for easy deployment and maintenance
 
 ## 🏗️ Architecture
 
-**Simple CLI Tool + Database Storage**
+**CLI Tool + PDF Parser + Database Storage**
 
 - Fetches papers from arXiv API
-- Stores metadata in PostgreSQL database
+- Downloads and parses PDFs using Docling
+- Stores metadata and parsed content in PostgreSQL database
 - Saves PDFs to local folder (`pdf_cache/`)
-- Runs via single command in terminal
+- Runs via single command in terminal with flexible arguments
 
 ### Technology Stack
 
 - **Language**: Python 3.12
 - **Database**: PostgreSQL with SQLAlchemy ORM
+- **PDF Parsing**: Docling (IBM Research)
 - **HTTP Client**: httpx (async)
 - **Configuration**: Pydantic Settings
 - **Package Management**: uv
@@ -37,6 +39,7 @@ A simple command-line tool for automatically downloading scientific papers from 
 - PostgreSQL database (Docker image recommended, or local installation)
 - Docker (optional, for PostgreSQL container)
 - uv package manager
+- Sufficient disk space for PDFs and ML models (~2-3GB for Docling models)
 
 ## 🚀 Installation
 
@@ -61,9 +64,11 @@ pip install uv
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install all dependencies
+# Install all dependencies (includes Docling and PyTorch)
 uv sync
 ```
+
+**Note**: First-time installation may take several minutes as it downloads ML models for PDF parsing.
 
 ### 4. Environment Configuration
 
@@ -87,93 +92,78 @@ ARXIV__PDF_CACHE_DIR=./pdf_cache
 
 ### 5. Database Setup
 
-**Option A: PostgreSQL with Docker (Recommended)**
 
-Run PostgreSQL in a Docker container:
-
-```bash
-# Pull and run PostgreSQL Docker image
-docker run -d \
-  --name arxiv-postgres \
-  -e POSTGRES_DB=rag_db \
-  -e POSTGRES_USER=rag_user \
-  -e POSTGRES_PASSWORD=rag_password \
-  -p 5432:5432 \
-  -v pgdata:/var/lib/postgresql/data \
-  postgres:16
-
-# Verify it's running
-docker ps | grep arxiv-postgres
-
-# View logs (optional)
-docker logs arxiv-postgres
-```
-
-
-
-**Managing Docker PostgreSQL:**
-```bash
-# Stop container
-docker stop arxiv-postgres
-
-# Start container
-docker start arxiv-postgres
-
-# Remove container (data persists in volume)
-docker rm arxiv-postgres
-
-# Remove container AND data
-docker rm arxiv-postgres
-docker volume rm pgdata
-```
-
-**Option B: Local PostgreSQL Installation**
-
-If you prefer a local installation:
+For local installation:
 
 ```bash
 # Connect to PostgreSQL
 psql -U postgres
 
 # Create database
-CREATE DATABASE rag_db;
+CREATE DATABASE db;
 
 # Create user
-CREATE USER rag_user WITH PASSWORD 'rag_password';
-GRANT ALL PRIVILEGES ON DATABASE rag_db TO rag_user;
+CREATE USER user WITH PASSWORD 'password';
+GRANT ALL PRIVILEGES ON DATABASE db TO user;
 ```
 
 **Note**: The database tables will be created automatically on first run. You can use either Docker or local PostgreSQL - the connection string in `.env` works for both!
 
 ## 🎮 Usage
 
-### Running the Downloader
+### Quick Start
 
-Download papers with a single command:
+Test your setup and connection to arXiv:
 
 ```bash
 # Activate virtual environment (if not already active)
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Run the paper ingestion
-python -m src.main
+# Test arXiv connection
+uv run python app.py --test
+```
+
+### Running the Downloader & Parser
+
+Download and parse papers with flexible command-line options:
+
+```bash
+# Download papers from yesterday (default: 10 papers)
+uv run python app.py
+
+# Download papers from a specific date (YYYYMMDD format)
+uv run python app.py --date 20250118
+
+# Download more papers (up to 2000 per request)
+uv run python app.py --max-results 50
+
+# Combine options
+uv run python app.py --date 20250118 --max-results 100
 ```
 
 This will:
-1. Fetch papers from arXiv based on your configured category
+1. Fetch papers from arXiv for the specified date
 2. Download PDFs to `pdf_cache/` folder
-3. Store metadata in PostgreSQL database
-4. Skip already downloaded papers (intelligent caching)
+3. Parse PDFs using Docling to extract text, tables, and figures
+4. Store metadata and parsed content in PostgreSQL database
+5. Skip already downloaded papers (intelligent caching)
+
+### Command-Line Arguments
+
+| Argument | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `--date` | Target date in YYYYMMDD format | Yesterday | `--date 20250118` |
+| `--max-results` | Maximum number of papers to fetch | 10 | `--max-results 50` |
+| `--test` | Test arXiv connection only | - | `--test` |
 
 ### Customizing Paper Download
 
 #### Change Research Category
 
-Edit `src/config.py` and modify the `search_category`:
+Edit `.env` and modify the `ARXIV__SEARCH_CATEGORY`:
 
-```python
-class ArxivSettings(BaseSettings):
-    search_category: str = "cond-mat.mtrl-sci"  # Change this!
+```env
+ARXIV__SEARCH_CATEGORY=cs.AI  # Change to your category
 ```
 
 **Common arXiv Categories:**
@@ -187,58 +177,55 @@ class ArxivSettings(BaseSettings):
 
 See [arXiv category taxonomy](https://arxiv.org/category_taxonomy) for complete list.
 
-
-
 ## 📁 Project Structure
 
 ```
 Arxiv_PDF_Downloader/
-├── src/                        # Main application source code
-│   ├── config.py              # Configuration (EDIT THIS for category change)
-│   ├── database.py            # Database setup
-│   ├── dependencies.py        # Dependency injection
-│   ├── exceptions.py          # Custom exceptions
-│   ├── models/                # SQLAlchemy models
-│   │   └── paper.py           # Paper database model
-│   ├── repositories/          # Data access layer
-│   │   └── paper.py           # Paper repository
-│   ├── schemas/               # Pydantic schemas
-│   │   └── arxiv/             # ArXiv data schemas
-│   │       └── paper.py       # Paper data structure
-│   └── services/              # Business logic
-│       ├── arxiv/             # ArXiv API client
-│       │   ├── client.py      # Main ArXiv client
-│       │   └── factory.py     # Client factory
-│       └── metadata_fetcher.py # Paper metadata processing
-├── pdf_cache/                 # Downloaded PDFs stored here
-├── pyproject.toml             # Project configuration and dependencies
-├── uv.lock                    # Dependency lock file
-├── .env                       # Environment variables (create this)
-└── README.md                  # This file
+├── app.py                     # Main CLI application (RUN THIS)
+├── src/                       # Application source code
+│   ├── config.py             # Configuration settings
+│   ├── db/                   # Database layer
+│   │   ├── base.py          # Base database setup
+│   │   └── factory.py       # Database factory
+│   ├── models/               # SQLAlchemy models
+│   │   └── paper.py         # Paper database model
+│   ├── repositories/         # Data access layer
+│   │   └── paper.py         # Paper repository
+│   ├── schemas/              # Pydantic schemas
+│   │   └── arxiv/           # ArXiv data schemas
+│   │       └── paper.py     # Paper data structure
+│   └── pdf_parser/           # pdf parser data scheme
+│   │       └── models.py     
+│   └── services/             # Business logic
+│       ├── arxiv/           # ArXiv API client
+│       │   ├── client.py    # Main ArXiv client
+│       │   └── factory.py   # Client factory
+│       ├── pdf_parser/      # PDF parsing services
+│       │   ├── docling.py   # Docling parser implementation
+│       │   ├── factory.py   # Parser factory
+│       │   └── parser.py    # Parser interface
+│       └── metadata_fetcher.py  # Paper metadata & PDF processing
+├── pdf_cache/                # Downloaded PDFs stored here
+├── pyproject.toml            # Project configuration and dependencies
+├── uv.lock                   # Dependency lock file
+├── .env                      # Environment variables (create this)
+└── README.md                 # This file
 ```
 
 ## 🔧 Configuration
 
 ### Quick Start Configuration
 
-1. **Change Research Category**: Edit `ARXIV__SEARCH_CATEGORY` in `.env` or modify `src/config.py`
+1. **Change Research Category**: Edit `ARXIV__SEARCH_CATEGORY` in `.env`
 2. **Adjust Rate Limiting**: Modify `ARXIV__RATE_LIMIT_DELAY` (minimum 3.0 seconds recommended)
 3. **Change PDF Storage**: Update `ARXIV__PDF_CACHE_DIR` path
-4. **Control Download Volume**: Set `ARXIV__MAX_RESULTS` (max 2000 per request)
+4. **Control Download Volume**: Use `--max-results` flag (max 2000 per request)
 5. **Switch Database**: Change `POSTGRES_DATABASE_URL` in `.env` (works with Docker or local PostgreSQL)
 
-**Example - Switching to Different Database:**
-```env
-# Use different Docker container
-POSTGRES_DATABASE_URL=postgresql://user:pass@localhost:5433/different_db
-
-# Use remote PostgreSQL server
-POSTGRES_DATABASE_URL=postgresql://user:pass@192.168.1.100:5432/arxiv_db
-```
 
 ### Database Configuration
 
-The tool stores paper metadata including:
+The tool stores comprehensive paper data including:
 - arXiv ID
 - Title
 - Authors
@@ -246,6 +233,8 @@ The tool stores paper metadata including:
 - Publication date
 - Categories
 - PDF URL and local path
+- **Parsed PDF content** (full text extracted by Docling)
+- Parsing timestamps and status
 
 All data persists in PostgreSQL for easy querying and analysis.
 
@@ -264,66 +253,23 @@ docker exec arxiv-postgres pg_dump -U rag_user rag_db > backup.sql
 docker exec -i arxiv-postgres psql -U rag_user rag_db < backup.sql
 ```
 
-## 🐛 Troubleshooting
+## 📊 Pipeline Execution Report
 
-### Common Issues
+After each run, the tool generates a detailed report:
 
-1. **Database Connection Errors**:
-   
-   **For Docker PostgreSQL:**
-   ```bash
-   # Check if container is running
-   docker ps | grep arxiv-postgres
-   
-   # Start if stopped
-   docker start arxiv-postgres
-   
-   # Check logs for errors
-   docker logs arxiv-postgres
-   
-   # Test connection
-   docker exec -it arxiv-postgres psql -U rag_user -d rag_db
-   ```
-   
-   **For Local PostgreSQL:**
-   ```bash
-   # Verify PostgreSQL is running
-   sudo systemctl status postgresql  # Linux
-   brew services list                # macOS
-   
-   # Test connection
-   psql -U rag_user -d rag_db -h localhost
-   ```
-   
-   **Common fixes:**
-   - Verify credentials in `.env` match your setup
-   - Ensure port 5432 is not blocked by firewall
-   - Check `POSTGRES_DATABASE_URL` format is correct
-
-2. **ArXiv API Rate Limiting (429 Error)**:
-   - **Wait 30-60 minutes** if you hit rate limit
-   - Increase `ARXIV__RATE_LIMIT_DELAY` to 5.0 or higher
-   - Avoid running the script multiple times in quick succession
-   - arXiv recommends maximum 1 request per 3 seconds
+```
+=== DAILY ARXIV PROCESSING REPORT ===
+Date: 2025-01-18
+Papers fetched: 50
+PDFs downloaded: 48
+PDFs parsed: 45
+Papers stored: 50
+Processing time: 342.5s
+Errors encountered: 2
+=== END REPORT ===
+```
 
 
-
-3. **uv Environment Issues**:
-   ```bash
-   # Recreate virtual environment
-   rm -rf .venv
-   uv venv
-   source .venv/bin/activate
-   uv sync
-   ```
-
-4. **Import Errors**:
-   ```bash
-   # Ensure you're in the project root directory
-   # Activate virtual environment first
-   source .venv/bin/activate
-   python -m src.main  # Use -m flag
-   ```
 
 ## 🧪 Development
 
@@ -334,26 +280,30 @@ The codebase is modular and easy to extend:
 - **Add new data sources**: Implement new clients in `src/services/`
 - **Change data models**: Modify `src/models/paper.py`
 - **Add processing logic**: Extend `src/services/metadata_fetcher.py`
+- **Customize PDF parsing**: Modify `src/services/pdf_parser/docling.py`
+
+### Running in Development Mode
+
+```bash
+# Enable debug logging
+# Edit app.py and change logging.DEBUG
+
+# Run with verbose output
+uv run python app.py --date 20250118 --max-results 5
+```
 
 
-
-## 🔮 Future Enhancements
-
-Planned features:
-- [ ] Airflow DAG for scheduled automation
-- [ ] FastAPI endpoints for programmatic access
-- [ ] Using Docling to Parse PDF Data
-- [ ] Multiple category support
-- [ ] Citation analysis
-- [ ] Full-text search
-
-## 📄 License
-
-[Add your license here]
 
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## 🙏 Acknowledgments
+
+- [arXiv](https://arxiv.org/) for providing open access to scientific papers
+- [Docling](https://github.com/DS4SD/docling) by IBM Research for PDF parsing capabilities
+- [uv](https://github.com/astral-sh/uv) for fast Python package management
+
+---
 
 **Note**: This tool is designed for personal research use. Please respect arXiv's [terms of use](https://arxiv.org/help/api/user-manual) and rate limits when using this tool.
