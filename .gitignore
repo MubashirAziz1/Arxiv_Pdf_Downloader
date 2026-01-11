@@ -210,3 +210,4 @@ __marimo__/
 /airflow
 /src/routers/
 /src/schemas/api
+/src/main.py

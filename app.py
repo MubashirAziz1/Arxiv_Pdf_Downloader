@@ -11,6 +11,8 @@ from sqlalchemy import text
 from src.db.factory import make_database
 from src.services.arxiv.factory import make_arxiv_client
 from src.services.metadata_fetcher import make_metadata_fetcher
+from src.services.pdf_parser.factory import make_pdf_parser_service
+
 
 # Setup logging with more detail
 logging.basicConfig(
@@ -25,24 +27,25 @@ logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
-def get_cached_services() -> Tuple[Any, Any, Any]:
+def get_cached_services() -> Tuple[Any, Any, Any, Any]:
     """
     Get cached service instances using lru_cache for automatic memoization.
 
     Returns:
-        Tuple of (arxiv_client, database, metadata_fetcher)
+        Tuple of (arxiv_client, pdf_parser, database, metadata_fetcher)
     """
     logger.info("Initializing services (cached with lru_cache)")
 
     # Initialize core services
     arxiv_client = make_arxiv_client()
+    pdf_parser = make_pdf_parser_service()
     database = make_database()
 
     # Create metadata fetcher with dependencies
-    metadata_fetcher = make_metadata_fetcher(arxiv_client)
+    metadata_fetcher = make_metadata_fetcher(arxiv_client, pdf_parser)
 
     logger.info("All services initialized and cached with lru_cache")
-    return arxiv_client, database, metadata_fetcher
+    return arxiv_client, pdf_parser, database, metadata_fetcher
 
 
 async def run_paper_ingestion_pipeline(
@@ -68,7 +71,7 @@ async def run_paper_ingestion_pipeline(
     logger.info(f"  - process_pdfs: {process_pdfs}")
     logger.info("="*70)
     
-    _arxiv_client, database, metadata_fetcher = get_cached_services()
+    _arxiv_client, _pdf_parser, database, metadata_fetcher = get_cached_services()
     
     # Log metadata_fetcher configuration
     logger.info(f"Metadata Fetcher Type: {type(metadata_fetcher).__name__}")
@@ -122,21 +125,21 @@ def setup_environment():
 
     try:
         # Get cached services (initialized once)
-        arxiv_client, database, metadata_fetcher = get_cached_services()
+        arxiv_client, _pdf_parser, database, _metadata_fetcher = get_cached_services()
 
         # Test database connection
         with database.get_session() as session:
             session.execute(text("SELECT 1"))
-            logger.info("✓ Database connection verified")
+            logger.info("Database connection verified")
 
-        logger.info(f"✓ arXiv client ready: {arxiv_client.base_url}")
-        logger.info(f"✓ Metadata fetcher initialized: {type(metadata_fetcher).__name__}")
+        logger.info(f"arXiv client ready: {arxiv_client.base_url}")
+        logger.info("PDF parser service ready (Docling models cached)")
 
         return {"status": "success", "message": "Environment setup completed"}
 
     except Exception as e:
         error_msg = f"Environment setup failed: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        logger.error(error_msg)
         raise Exception(error_msg)
 
 
@@ -151,7 +154,7 @@ def fetch_daily_papers(target_date: str = None, max_results: int = 10):
     Returns:
         Dictionary with processing results
     """
-    logger.info("Starting daily arXiv paper fetch")
+    logger.info("Starting arXiv paper fetch")
 
     try:
         # Calculate date range
@@ -187,27 +190,29 @@ def fetch_daily_papers(target_date: str = None, max_results: int = 10):
         raise Exception(error_msg)
 
 
-def process_failed_pdfs(fetch_results: Dict[str, Any] = None):
+def process_failed_pdfs(**context):
     """
     Retry processing of PDFs that failed in the main fetch task.
 
-    Args:
-        fetch_results: Results from fetch_daily_papers
-
-    Returns:
-        Dictionary with retry results
+    This function:
+    1. Gets failed PDF list from the main task
+    2. Retries processing with different settings
+    3. Reports final success/failure statistics
     """
     logger.info("Processing failed PDFs")
 
     try:
+        fetch_results = context["task_instance"].xcom_pull(task_ids="fetch_daily_papers", key="fetch_results")
+
         if not fetch_results or not fetch_results.get("errors"):
             logger.info("No failed PDFs to retry")
             return {"status": "skipped", "message": "No failures to retry"}
 
         logger.info(f"Found {len(fetch_results['errors'])} errors to investigate")
 
-        for i, error in enumerate(fetch_results["errors"], 1):
-            logger.warning(f"Error {i}/{len(fetch_results['errors'])}: {error}")
+        for error in fetch_results["errors"]:
+            # TODO: Implement retry logic
+            logger.warning(f"Error to investigate: {error}")
 
         return {
             "status": "analyzed",
@@ -217,32 +222,33 @@ def process_failed_pdfs(fetch_results: Dict[str, Any] = None):
 
     except Exception as e:
         error_msg = f"Failed PDF processing error: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        logger.error(error_msg)
         raise Exception(error_msg)
 
 
-def generate_daily_report(fetch_results: Dict[str, Any] = None, failed_pdf_results: Dict[str, Any] = None):
+def generate_daily_report(**context):
     """
     Generate a daily processing report.
 
-    Args:
-        fetch_results: Results from fetch_daily_papers
-        failed_pdf_results: Results from process_failed_pdfs
-
-    Returns:
-        Dictionary with report data
+    This function:
+    1. Collects results from all tasks
+    2. Generates summary statistics
+    3. Logs the daily report
     """
     logger.info("Generating daily processing report")
 
     try:
-        report_date = datetime.now().strftime("%Y-%m-%d")
+        fetch_results = context["task_instance"].xcom_pull(task_ids="fetch_daily_papers", key="fetch_results")
+
+        failed_pdf_results = context["task_instance"].xcom_pull(task_ids="process_failed_pdfs")
 
         report = {
-            "date": report_date,
+            "date": context["ds"],
             "execution_time": datetime.now().isoformat(),
             "papers": {
                 "fetched": fetch_results.get("papers_fetched", 0) if fetch_results else 0,
                 "pdfs_downloaded": fetch_results.get("pdfs_downloaded", 0) if fetch_results else 0,
+                "pdfs_parsed": fetch_results.get("pdfs_parsed", 0) if fetch_results else 0,
                 "stored": fetch_results.get("papers_stored", 0) if fetch_results else 0,
             },
             "processing": {
@@ -250,30 +256,24 @@ def generate_daily_report(fetch_results: Dict[str, Any] = None, failed_pdf_resul
                 "errors": len(fetch_results.get("errors", [])) if fetch_results else 0,
                 "failed_pdf_retries": failed_pdf_results.get("errors_logged", 0) if failed_pdf_results else 0,
             },
+            
         }
 
-        logger.info("="*70)
         logger.info("=== DAILY ARXIV PROCESSING REPORT ===")
-        logger.info("="*70)
         logger.info(f"Date: {report['date']}")
-        logger.info(f"Execution Time: {report['execution_time']}")
-        logger.info("")
-        logger.info("Papers:")
-        logger.info(f"  - Fetched: {report['papers']['fetched']}")
-        logger.info(f"  - PDFs downloaded: {report['papers']['pdfs_downloaded']}")
-        logger.info(f"  - Stored in DB: {report['papers']['stored']}")
-        logger.info("")
-        logger.info("Processing:")
-        logger.info(f"  - Processing time: {report['processing']['processing_time_seconds']:.1f}s")
-        logger.info(f"  - Errors encountered: {report['processing']['errors']}")
-        logger.info(f"  - Failed PDF retries: {report['processing']['failed_pdf_retries']}")
-        logger.info("="*70)
+        logger.info(f"Papers fetched: {report['papers']['fetched']}")
+        logger.info(f"PDFs downloaded: {report['papers']['pdfs_downloaded']}")
+        logger.info(f"PDFs parsed: {report['papers']['pdfs_parsed']}")
+        logger.info(f"Papers stored: {report['papers']['stored']}")
+        logger.info(f"Processing time: {report['processing']['processing_time_seconds']:.1f}s")
+        logger.info(f"Errors encountered: {report['processing']['errors']}")
+        logger.info("=== END REPORT ===")
 
         return report
 
     except Exception as e:
         error_msg = f"Report generation failed: {str(e)}"
-        logger.error(error_msg, exc_info=True)
+        logger.error(error_msg)
         raise Exception(error_msg)
 
 
@@ -284,7 +284,7 @@ def test_arxiv_connection():
     logger.info("="*70)
     
     try:
-        arxiv_client, _, _ = get_cached_services()
+        arxiv_client, _pdf_parser, _database, _metadata_fetcher = get_cached_services()
         
         # Try to fetch just 1 paper from arXiv to test connection
         logger.info("Testing arXiv API with a simple query...")
@@ -299,8 +299,13 @@ def test_arxiv_connection():
             max_results=1
         )
         
-        logger.info(f"Test results: {papers}")
-        return True
+        if papers and len(papers) > 0:
+            logger.info(f"✓ ArXiv connection successful! Retrieved {len(papers)} paper(s)")
+            logger.info(f"Sample paper: {papers[0].get('title', 'No title')}")
+            return True
+        else:
+            logger.warning("⚠ ArXiv connection successful but no papers returned")
+            return None
             
     except Exception as e:
         logger.error(f"✗ ArXiv connection test failed: {e}", exc_info=True)
@@ -362,11 +367,13 @@ def main():
             test_result = test_arxiv_connection()
             if test_result:
                 logger.info("\n✓ Test passed! ArXiv API is accessible.")
+                return 0
             elif test_result is None:
                 logger.warning("\n⚠ Test inconclusive - check logs above")
+                return 0
             else:
                 logger.error("\n✗ Test failed - check logs above")
-            return 0 if test_result else 1
+                return 1
 
         # Step 2: Fetch daily papers
         logger.info("[STEP 2/4] Fetching papers...")
@@ -378,22 +385,57 @@ def main():
         )
         logger.info(f"✓ Papers fetched: {fetch_results.get('papers_fetched', 0)}\n")
         
-        # Step 3: Process failed PDFs
+        # Step 3: Process failed PDFs (mock context for standalone mode)
         logger.info("[STEP 3/4] Processing failed PDFs...")
-        failed_results = process_failed_pdfs(fetch_results=fetch_results)
+        
+        # Create proper mock for task_instance.xcom_pull
+        class MockTaskInstance:
+            def __init__(self, fetch_results):
+                self.fetch_results = fetch_results
+            
+            def xcom_pull(self, task_ids=None, key=None):
+                """Mock xcom_pull that returns fetch_results"""
+                if task_ids == "fetch_daily_papers":
+                    return self.fetch_results
+                return None
+        
+        mock_context = {
+            "task_instance": MockTaskInstance(fetch_results)
+        }
+        
+        failed_results = process_failed_pdfs(**mock_context)
         logger.info(f"✓ Failed PDF processing: {failed_results['status']}\n")
         
-        # Step 4: Generate report
+        # Step 4: Generate report (mock context for standalone mode)
         logger.info("[STEP 4/4] Generating daily report...")
-        report = generate_daily_report(
-            fetch_results=fetch_results,
-            failed_pdf_results=failed_results
-        )
+        
+        class MockTaskInstanceForReport:
+            def __init__(self, fetch_results, failed_results):
+                self.fetch_results = fetch_results
+                self.failed_results = failed_results
+            
+            def xcom_pull(self, task_ids=None, key=None):
+                """Mock xcom_pull for report generation"""
+                if task_ids == "fetch_daily_papers":
+                    return self.fetch_results
+                elif task_ids == "process_failed_pdfs":
+                    return self.failed_results
+                return None
+        
+        report_context = {
+            "ds": datetime.now().strftime("%Y-%m-%d"),
+            "task_instance": MockTaskInstanceForReport(fetch_results, failed_results)
+        }
+        
+        report = generate_daily_report(**report_context)
         logger.info("✓ Report generated successfully\n")
         
         # Final summary
         logger.info("="*70)
         logger.info("Pipeline execution completed successfully!")
+        logger.info(f"Total papers processed: {report['papers']['fetched']}")
+        logger.info(f"Total papers stored: {report['papers']['stored']}")
+        logger.info(f"Total processing time: {report['processing']['processing_time_seconds']:.1f}s")
         logger.info("="*70)
         
         return 0

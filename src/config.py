@@ -30,6 +30,14 @@ class ArxivSettings(DefaultSettings):
         }
     )
 
+class PDFParserSettings(DefaultSettings):
+    """PDF parser service settings."""
+
+    max_pages: int = 30
+    max_file_size_mb: int = 20
+    do_ocr: bool = False
+    do_table_structure: bool = True
+
 
 class Settings(DefaultSettings):
     """Application settings."""
@@ -48,6 +56,8 @@ class Settings(DefaultSettings):
     # ArXiv configuration
     arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
 
+    # PDF parser settings
+    pdf_parser: PDFParserSettings = Field(default_factory=PDFParserSettings)
 
 def get_settings() -> Settings:
     """Get application settings."""
